@@ -4,124 +4,153 @@ import (
 	"bufio"
 	"fmt"
 	"io/fs"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
 
 func main() {
-	printMessage("Welcome to Runner!", 0, 1)
-	printMessage(strings.Repeat("*", 40), 0, 2)
+	printMessage("Welcome to Go Runner!", 0, 1)
+	printMessage(strings.Repeat("*", 40), 0, 1)
+
 	for {
-		root := "syntax"
-		rootUserChoice := getUserInput(`1. Syntax
-2. Packages
-Choose a number`, 2)
-		if rootUserChoice == 2 {
-			root = "packages"
-		}
-		folders, err := getSubFolders(root)
+		rootOptions := []string{"Syntax", "Packages"}
+		rootPrompt := buildOptionsPrompt(rootOptions, "Choose a category")
+		rootChoice, err := getUserChoice(rootPrompt, len(rootOptions))
 		if err != nil {
-			log.Fatalf("Walk Directory Error: %v", err)
+			printMessage("Failed to get valid input. Continuing to next selection.", 1, 1)
+			continue
 		}
-		var builderSub strings.Builder
-		builderSub.WriteString("\n")
-		for i, v := range folders {
-			builderSub.WriteString(fmt.Sprintf("%d: '%s'\n", i+1, v))
+		root := strings.ToLower(rootOptions[rootChoice-1])
+
+		subFolders, err := getSubFolders(root)
+		if err != nil {
+			printMessage(fmt.Sprintf("Error listing subfolders: %v", err), 1, 1)
+			continue
 		}
-		builderSub.WriteString("Choose a number")
-		subUserChoice := getUserInput(builderSub.String(), len(folders))
-		sub := folders[subUserChoice-1]
-		mainFilesRoot := fmt.Sprintf("%s/%s", root, sub)
+		if len(subFolders) == 0 {
+			printMessage("No subfolders found in the selected category.", 1, 1)
+			continue
+		}
+		sort.Strings(subFolders) // Sort for consistent ordering
+		subPrompt := buildOptionsPrompt(subFolders, "Choose a subfolder")
+		subChoice, err := getUserChoice(subPrompt, len(subFolders))
+		if err != nil {
+			printMessage("Failed to get valid input. Continuing to next selection.", 1, 1)
+			continue
+		}
+		sub := subFolders[subChoice-1]
+
+		mainFilesRoot := filepath.Join(root, sub)
 		mainFiles, err := getMainFiles(mainFilesRoot)
 		if err != nil {
-			log.Fatalf("Walk Directory Error: %v", err)
+			printMessage(fmt.Sprintf("Error listing main files: %v", err), 1, 1)
+			continue
 		}
-		var builderFiles strings.Builder
-		builderFiles.WriteString("\n")
-		for i, v := range mainFiles {
-			result, _ := strings.CutPrefix(v, mainFilesRoot+"/")
-			builderFiles.WriteString(fmt.Sprintf("%d: '%s'\n", i+1, result))
+		if len(mainFiles) == 0 {
+			printMessage("No main.go files found in the selected subfolder.", 1, 1)
+			continue
 		}
-		builderFiles.WriteString("Choose a number")
-		fileUserChoice := getUserInput(builderFiles.String(), len(mainFiles))
-		file := mainFiles[fileUserChoice-1]
+		sort.Strings(mainFiles) // Sort for consistent ordering
+		fileOptions := make([]string, len(mainFiles))
+		for i, file := range mainFiles {
+			relPath, _ := strings.CutPrefix(file, mainFilesRoot+"/")
+			fileOptions[i] = relPath
+		}
+		filePrompt := buildOptionsPrompt(fileOptions, "Choose a file to run")
+		fileChoice, err := getUserChoice(filePrompt, len(mainFiles))
+		if err != nil {
+			printMessage("Failed to get valid input. Continuing to next selection.", 1, 1)
+			continue
+		}
+		file := mainFiles[fileChoice-1]
+
 		printMessage(strings.Repeat("=", 40), 1, 1)
+		//printMessage(fmt.Sprintf("Running: %s", file), 0, 1)
 		cmd := exec.Command("go", "run", file)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr // Capture stderr for better error visibility
 		if err := cmd.Run(); err != nil {
-			printMessage(fmt.Sprintf("Go Run Error: %v", err), 1, 1)
+			printMessage(fmt.Sprintf("Error running file: %v", err), 1, 1)
 		}
 		printMessage(strings.Repeat("=", 40), 0, 1)
-		continueUserInput := getUserInput(`1. Yes
-2. No
-Do you want to continue? `, 2)
-		if continueUserInput == 2 {
+
+		continueOptions := []string{"Yes", "No"}
+		continuePrompt := buildOptionsPrompt(continueOptions, "Do you want to continue?")
+		continueChoice, err := getUserChoice(continuePrompt, len(continueOptions))
+		if err != nil {
+			printMessage("Failed to get valid input. Exiting.", 1, 1)
+			break
+		}
+		if continueChoice == 2 {
 			printMessage(strings.Repeat("*", 40), 1, 1)
-			printMessage("Bye!", 0, 1)
+			printMessage("Goodbye!", 0, 1)
 			break
 		}
 		printMessage(strings.Repeat("*", 40), 1, 1)
-		printMessage("Run your Go apps again!", 0, 1)
+		printMessage("Let's run another Go app!", 0, 1)
 		printMessage(strings.Repeat("*", 40), 0, 2)
 	}
 }
 
-func printMessage(message string, beforeCount, afterCount int) {
-	beforeNewLine := strings.Builder{}
-	afterNewLine := strings.Builder{}
-	if beforeCount > 0 {
-		for range beforeCount {
-			beforeNewLine.WriteString("\n")
-		}
+func printMessage(message string, beforeLines, afterLines int) {
+	for i := 0; i < beforeLines; i++ {
+		fmt.Println()
 	}
-	if afterCount > 0 {
-		for range afterCount {
-			afterNewLine.WriteString("\n")
-		}
+	fmt.Print(message)
+	for i := 0; i < afterLines; i++ {
+		fmt.Println()
 	}
-	fmt.Print(beforeNewLine.String() + message + afterNewLine.String())
 }
 
-func getUserInput(prompt string, maxSize int) int {
-	var numberUserChoice int
-	for {
-		printMessage(prompt+": ", 0, 0)
-		reader := bufio.NewReader(os.Stdin)
-		input, err := reader.ReadString('\n')
-		if err != nil {
-			printMessage(fmt.Sprintf("Reading Input Error: %v", err), 1, 1)
-			continue
-		}
-		numberUserChoice, err = strconv.Atoi(strings.TrimSpace(input))
-		if err != nil {
-			printMessage(fmt.Sprintf("Invalid Input Error: %v", err), 1, 1)
-			continue
-		}
-		if numberUserChoice < 1 || numberUserChoice > maxSize {
-			printMessage("Invalid Number Error: the number is out of the range!", 1, 1)
-			continue
-		}
-		break
+func buildOptionsPrompt(options []string, title string) string {
+	var builder strings.Builder
+	builder.WriteString("\n----> " + title + " <----\n")
+	for i, opt := range options {
+		builder.WriteString(fmt.Sprintf("%d. %s\n", i+1, opt))
 	}
-	return numberUserChoice
+	builder.WriteString("Enter your choice: ")
+	return builder.String()
+}
+
+func getUserChoice(prompt string, maxSize int) (int, error) {
+	scanner := bufio.NewScanner(os.Stdin)
+	for {
+		printMessage(prompt, 0, 0)
+		if !scanner.Scan() {
+			printMessage("Error reading input. Please try again.", 1, 0)
+			continue
+		}
+		input := strings.TrimSpace(scanner.Text())
+		choice, err := strconv.Atoi(input)
+		if err != nil {
+			printMessage("Invalid input: please enter a number. Try again.", 1, 0)
+			continue
+		}
+		if choice < 1 || choice > maxSize {
+			printMessage(fmt.Sprintf("Invalid choice: must be between 1 and %d. Try again.", maxSize), 1, 0)
+			continue
+		}
+		return choice, nil
+	}
 }
 
 func getSubFolders(rootFolder string) ([]string, error) {
 	var subFolders []string
-	if err := filepath.WalkDir(rootFolder, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(rootFolder, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() && strings.Count(path, "/") == 1 {
+		if d.IsDir() && path != rootFolder && strings.Count(path, string(filepath.Separator)) == 1 {
 			subFolders = append(subFolders, filepath.Base(path))
 		}
 		return nil
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
 	return subFolders, nil
@@ -129,15 +158,16 @@ func getSubFolders(rootFolder string) ([]string, error) {
 
 func getMainFiles(rootFolder string) ([]string, error) {
 	var mainFiles []string
-	if err := filepath.WalkDir(rootFolder, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(rootFolder, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if !d.IsDir() && d.Name() == "main.go" {
+		if !d.IsDir() && filepath.Base(path) == "main.go" {
 			mainFiles = append(mainFiles, path)
 		}
 		return nil
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
 	return mainFiles, nil
