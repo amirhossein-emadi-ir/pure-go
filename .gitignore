@@ -3,3 +3,6 @@
 
 ### Diff file ###
 diff.txt
+
+### Bash Scripts ###
+*.sh
